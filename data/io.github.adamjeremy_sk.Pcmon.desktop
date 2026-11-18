@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=pcmon
+GenericName=System Monitor
+Comment=CPU, GPU, fan and memory readings at a glance
+Exec=pcmon
+Icon=pcmon
+Terminal=false
+Categories=System;Monitor;GTK;
+Keywords=cpu;gpu;temperature;fan;memory;monitor;
+StartupWMClass=pcmon
