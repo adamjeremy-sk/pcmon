@@ -31,7 +31,9 @@ typedef struct {
     PcSection *fans;
     PcSection *mem;
     GtkWidget *status;
-    gboolean system_dark; // the desktop's own choice, restored when the theme is "System"
+    gboolean system_dark;  // the desktop's own choice, restored when the theme is "System"
+    gboolean applied_dark; // what GtkSettings holds now
+    guint theme_source;    // pending idle call that applies the theme, or 0
 } PcWindow;
 
 static void render_cpu(PcWindow *w, const PcCpu *cpu) {
@@ -172,10 +174,22 @@ static void on_snapshot(PcSnapshot *snap, gpointer data) {
     render(w, snap);
 }
 
-static void apply_theme(PcWindow *w) {
+static void apply_theme_now(gpointer data) {
+    PcWindow *w = data;
+    w->theme_source = 0;
     gboolean dark = w->settings->theme == PC_THEME_DARK ||
                     (w->settings->theme == PC_THEME_SYSTEM && w->system_dark);
-    g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", dark, NULL);
+    if (dark != w->applied_dark) { // setting it again would make GTK reload the theme for nothing
+        w->applied_dark = dark;
+        g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", dark, NULL);
+    }
+}
+
+// A theme change restyles every widget, so it waits until the click that asked for it is over.
+static void apply_theme(PcWindow *w) {
+    if (w->theme_source == 0) {
+        w->theme_source = g_idle_add_once(apply_theme_now, w);
+    }
 }
 
 static void apply_window_state(PcWindow *w) {
@@ -204,6 +218,9 @@ static void on_map(GtkWidget *widget, gpointer data) {
 static void on_destroy(GtkWidget *widget, gpointer data) {
     (void)widget;
     PcWindow *w = data;
+    if (w->theme_source != 0) {
+        g_source_remove(w->theme_source);
+    }
     pc_poller_stop(w->poller); // after this the snapshot callback never runs again
     pc_snapshot_free(w->last);
     pc_options_free(w->options);
@@ -233,6 +250,8 @@ GtkWidget *pc_window_new(GtkApplication *app, PcSensors *sensors, double interva
     w->settings_path = pc_settings_default_path();
     w->settings = pc_settings_load(w->settings_path, legacy);
     g_free(legacy);
+    w->applied_dark = w->system_dark;
+    apply_theme_now(w); // before the window is shown, so there is no flash of the wrong theme
     w->gpu_sections =
         g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)pc_section_free);
 

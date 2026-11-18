@@ -15,7 +15,6 @@ struct PcOptions {
     GtkWidget *top;
     GtkWidget *opacity;
     GtkWidget *shared;
-    GtkWidget *theme;
     GtkWidget *fan_group; // hidden until a fan is detected
     GtkWidget *fan_box;
     GHashTable *fan_entries; // fan id -> GtkEntry (owned by the popover)
@@ -38,11 +37,12 @@ static void on_shared_toggled(GtkCheckButton *button, gpointer data) {
     notify(o);
 }
 
-static void on_theme_changed(GObject *dropdown, GParamSpec *pspec, gpointer data) {
-    (void)pspec;
+static void on_theme_toggled(GtkCheckButton *button, gpointer data) {
     PcOptions *o = data;
-    o->settings->theme = (PcTheme)gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
-    notify(o);
+    if (gtk_check_button_get_active(button)) {
+        o->settings->theme = (PcTheme)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "theme"));
+        notify(o);
+    }
 }
 
 static void on_opacity_changed(GtkRange *range, gpointer data) {
@@ -106,14 +106,24 @@ PcOptions *pc_options_new(PcSettings *settings, PcOptionsChanged changed, gpoint
     o->user_data = user_data;
     o->fan_entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
-    static const char *const theme_names[] = {"System", "Light", "Dark", NULL};
-    o->theme = gtk_drop_down_new_from_strings(theme_names);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(o->theme), settings->theme);
+    // Plain radio buttons rather than a drop-down: a drop-down opens a second popover, and
+    // switching the theme while it is open left the Options popover impossible to close.
     GtkWidget *theme_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *theme_label = pc_label_new("Theme", NULL, FALSE, FALSE);
     gtk_widget_set_hexpand(theme_label, TRUE);
     gtk_box_append(GTK_BOX(theme_row), theme_label);
-    gtk_box_append(GTK_BOX(theme_row), o->theme);
+    static const char *const theme_names[] = {"System", "Light", "Dark"};
+    GtkWidget *theme_buttons[G_N_ELEMENTS(theme_names)];
+    for (guint i = 0; i < G_N_ELEMENTS(theme_names); i++) {
+        theme_buttons[i] = gtk_check_button_new_with_label(theme_names[i]);
+        g_object_set_data(G_OBJECT(theme_buttons[i]), "theme", GINT_TO_POINTER(i));
+        if (i > 0) {
+            gtk_check_button_set_group(GTK_CHECK_BUTTON(theme_buttons[i]),
+                                       GTK_CHECK_BUTTON(theme_buttons[0]));
+        }
+        gtk_box_append(GTK_BOX(theme_row), theme_buttons[i]);
+    }
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(theme_buttons[settings->theme]), TRUE);
 
     o->top = gtk_check_button_new_with_label("Always on top");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(o->top), settings->always_on_top);
@@ -167,7 +177,9 @@ PcOptions *pc_options_new(PcSettings *settings, PcOptionsChanged changed, gpoint
 
     g_signal_connect(o->top, "toggled", G_CALLBACK(on_top_toggled), o);
     g_signal_connect(o->opacity, "value-changed", G_CALLBACK(on_opacity_changed), o);
-    g_signal_connect(o->theme, "notify::selected", G_CALLBACK(on_theme_changed), o);
+    for (guint i = 0; i < G_N_ELEMENTS(theme_buttons); i++) {
+        g_signal_connect(theme_buttons[i], "toggled", G_CALLBACK(on_theme_toggled), o);
+    }
     g_signal_connect(o->shared, "toggled", G_CALLBACK(on_shared_toggled), o);
     return o;
 }
